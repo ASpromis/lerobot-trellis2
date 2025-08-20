@@ -287,6 +287,13 @@ def train(cfg: TrainPipelineConfig):
 
 
 def main():
+    
+    # # set only for debug
+    # import debugpy
+    # debugpy.listen(4071)
+    # print("Waiting for debugger to attach...")
+    # debugpy.wait_for_client()
+    
     init_logging()
     train()
 

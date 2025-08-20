@@ -47,7 +47,7 @@ def get_policy_class(name: str) -> PreTrainedPolicy:
 
         return DiffusionPolicy
     elif name == "act":
-        from lerobot.policies.act.modeling_act import ACTPolicy
+        from lerobot.policies.act.modeling_act_dinov2 import ACTPolicy
 
         return ACTPolicy
     elif name == "vqbet":

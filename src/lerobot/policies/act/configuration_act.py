@@ -105,8 +105,8 @@ class ACTConfig(PreTrainedConfig):
 
     # Architecture.
     # Vision backbone.
-    vision_backbone: str = "resnet18"
-    pretrained_backbone_weights: str | None = "ResNet18_Weights.IMAGENET1K_V1"
+    vision_backbone: str = "dinov2"
+    pretrained_backbone_weights: str | None = "facebook/dinov2-small"
     replace_final_stride_with_dilation: int = False
     # Transformer layers.
     pre_norm: bool = False
@@ -141,9 +141,9 @@ class ACTConfig(PreTrainedConfig):
         super().__post_init__()
 
         """Input validation (not exhaustive)."""
-        if not self.vision_backbone.startswith("resnet"):
+        if not (self.vision_backbone.startswith("resnet") or self.vision_backbone == "dinov2"):
             raise ValueError(
-                f"`vision_backbone` must be one of the ResNet variants. Got {self.vision_backbone}."
+                f"`vision_backbone` must be one of the ResNet variants or 'dinov2'. Got {self.vision_backbone}."
             )
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(
