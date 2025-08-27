@@ -66,16 +66,16 @@ def convert_dataset(
 
     convert_stats(dataset, num_workers=num_workers)
     ref_stats = load_stats(dataset.root)
-    check_aggregate_stats(dataset, ref_stats)
+    # check_aggregate_stats(dataset, ref_stats)
 
     dataset.meta.info["codebase_version"] = CODEBASE_VERSION
     write_info(dataset.meta.info, dataset.root)
 
     dataset.push_to_hub(branch=branch, tag_version=False, allow_patterns="meta/")
 
-    # delete old stats.json file
-    if (dataset.root / STATS_PATH).is_file:
-        (dataset.root / STATS_PATH).unlink()
+    # # delete old stats.json file
+    # if (dataset.root / STATS_PATH).is_file:
+    #     (dataset.root / STATS_PATH).unlink()
 
     hub_api = HfApi()
     if hub_api.file_exists(

@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import logging
+from termcolor import colored
 
 from torch import nn
 
@@ -46,10 +47,10 @@ def get_policy_class(name: str) -> PreTrainedPolicy:
         from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
 
         return DiffusionPolicy
-    elif name == "act":
-        from lerobot.policies.act.modeling_act_dinov2 import ACTPolicy
+    # elif name == "act":
+    #     from lerobot.policies.act.modeling_act import ACTPolicy
 
-        return ACTPolicy
+    #     return ACTPolicy
     elif name == "vqbet":
         from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
 
@@ -77,6 +78,20 @@ def get_policy_class(name: str) -> PreTrainedPolicy:
     else:
         raise NotImplementedError(f"Policy with name {name} is not implemented.")
 
+def get_act_policy_class(cfg: ACTConfig):
+    dinov3_backbones = {
+        "dinov3-vit7b16","dinov3-convnext-tiny"
+    }
+    
+    if hasattr(cfg, 'vision_backbone') and cfg.vision_backbone in dinov3_backbones:
+        from lerobot.policies.act.modeling_act_dinov3 import ACTPolicy
+        logging.info(colored('using modeling_act_dinov3.py', 'yellow', attrs=['bold']))
+    else:
+        from lerobot.policies.act.modeling_act import ACTPolicy
+        logging.info(colored('using modeling_act.py', 'yellow', attrs=['bold']))
+    
+    logging.info(colored(f"using vision_backbone: {cfg.vision_backbone}", 'yellow', attrs=['bold']))
+    return ACTPolicy
 
 def make_policy_config(policy_type: str, **kwargs) -> PreTrainedConfig:
     if policy_type == "tdmpc":
@@ -141,8 +156,11 @@ def make_policy(
             "Current implementation of VQBeT does not support `mps` backend. "
             "Please use `cpu` or `cuda` backend."
         )
-
-    policy_cls = get_policy_class(cfg.type)
+        
+    if cfg.type == "act":
+        policy_cls = get_act_policy_class(cfg)
+    else:
+        policy_cls = get_policy_class(cfg.type)
 
     kwargs = {}
     if ds_meta is not None:

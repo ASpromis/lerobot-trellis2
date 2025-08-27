@@ -38,7 +38,7 @@ from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.normalize import Normalize, Unnormalize
 from lerobot.policies.pretrained import PreTrainedPolicy
 
-from transformers import AutoImageProcessor, AutoModel
+from transformers import AutoModel
 
 class ACTPolicy(PreTrainedPolicy):
     """
@@ -335,14 +335,27 @@ class ACT(nn.Module):
                 create_sinusoidal_pos_embedding(num_input_token_encoder, config.dim_model).unsqueeze(0),
             )
 
-        # Dinov2 Backbone for image feature extraction.
+        # Dinov3 Backbone for image feature extraction.
         if self.config.image_features:
-            self.pretrained_model_name = "facebook/dinov2-small"
-            self.processor = AutoImageProcessor.from_pretrained(self.pretrained_model_name)
-            # Remove device_map="auto" to avoid device conflicts
+            dinov3_configs = {
+                "dinov3-vit7b16" : {
+                    "pretrained_model_name" : "facebook/dinov3-vit7b16-pretrain-lvd1689m",
+                    "output_dim" : 4096
+                },
+                "dinov3-convnext-tiny" : {
+                    "pretrained_model_name" : "facebook/dinov3-convnext-tiny-pretrain-lvd1689m",
+                    "output_dim" : 768
+                }
+            }
+            
+            if self.config.vision_backbone in dinov3_configs:
+                backbone_config = dinov3_configs[self.config.vision_backbone]
+                self.pretrained_model_name = backbone_config["pretrained_model_name"]
+                self.dinov3_output_dim = backbone_config["output_dim"]
+            else:
+                raise ValueError(f"Unsupported vision_backbone: {self.policy.vision_backbone}")
+            
             self.backbone = AutoModel.from_pretrained(self.pretrained_model_name)
-            # DINOv2-small output dimension is 384
-            self.dinov2_output_dim = 384
 
         # Transformer (acts as VAE decoder when training with the variational objective).
         self.encoder = ACTEncoder(config)
@@ -360,9 +373,9 @@ class ACT(nn.Module):
             )
         self.encoder_latent_input_proj = nn.Linear(config.latent_dim, config.dim_model)
         if self.config.image_features:
-            # DINOv2 outputs pooled features, use Linear instead of Conv2d
+            # DINOv3 outputs pooled features, use Linear instead of Conv2d
             self.encoder_img_feat_input_proj = nn.Linear(
-                self.dinov2_output_dim, config.dim_model
+                self.dinov3_output_dim, config.dim_model
             )
         # Transformer encoder positional embeddings.
         n_1d_tokens = 1  # for the latent
@@ -492,58 +505,41 @@ class ACT(nn.Module):
             encoder_in_pos_embed.append(self.encoder_1d_feature_pos_embed.weight[pos_idx].unsqueeze(0).expand(batch_size, -1))
 
         if self.config.image_features:
-            # Process images with DINOv2
             cam_idx = 1 + (1 if self.config.robot_state_feature else 0) + (1 if self.config.env_state_feature else 0)
             for img in batch["observation.images"]:
-                # Normalize image to [0, 1] range for DINOv2 processor
+                # Normalize image to [0, 1] range for DINOv3 processor
                 if isinstance(img, torch.Tensor):
-                    # Get the device of the input data for consistency
                     input_device = img.device
-                    
-                    # Normalize to [0, 1] range by min-max scaling
-                    img_min = img.min()
-                    img_max = img.max()
-                    if img_max > img_min:
-                        img_normalized = (img - img_min) / (img_max - img_min)
-                    else:
-                        img_normalized = torch.zeros_like(img)
-                    
-                    # Convert to list of numpy arrays for processor
-                    batch_size = img_normalized.shape[0]
-                    image_list = []
-                    for b in range(batch_size):
-                        # Convert (C, H, W) to (H, W, C) and to numpy
-                        single_img = img_normalized[b].permute(1, 2, 0).cpu().numpy()
-                        image_list.append(single_img)
-                    
-                    # Ensure backbone is on the same device as input
                     self.backbone = self.backbone.to(input_device)
                     
-                    # Process batch with DINOv2 processor (disable rescaling as images are already normalized)
-                    inputs = self.processor(images=image_list, return_tensors="pt", do_rescale=False).to(input_device)
+                    # Manual preprocessing for DINOv3
+                    # Resize to 224x224
+                    if img.shape[-2:] != (224, 224):
+                        img = F.interpolate(img, size=(224, 224), mode='bilinear', align_corners=False)
                     
-                    # Extract features with DINOv2
+                    # Normalize with ImageNet stats
+                    mean = torch.tensor([0.485, 0.456, 0.406]).to(input_device).view(1, 3, 1, 1)
+                    std = torch.tensor([0.229, 0.224, 0.225]).to(input_device).view(1, 3, 1, 1)
+                    img_normalized = (img - mean) / std
+                    
+                    inputs = {"pixel_values": img_normalized}
                     with torch.no_grad():
                         outputs = self.backbone(**inputs)
                     
-                    # Get pooled output features (B, 384 for small) and clone to enable gradients
-                    cam_features = outputs.pooler_output.clone()  # Shape: (B, 384)
+                    # Get pooled output features (B, 1536 for vit7b16) and clone to enable gradients
+                    cam_features = outputs.pooler_output.clone()  # Shape: (B, 1536)
                 
-                # Project to model dimension
                 cam_features = self.encoder_img_feat_input_proj(cam_features)  # (B, dim_model)
                 # Add to token list (no spatial dimensions since we use pooled features)
                 encoder_in_tokens.append(cam_features)
-                # Use proper position embedding for camera features
                 cam_pos_embed = self.encoder_1d_feature_pos_embed.weight[cam_idx].unsqueeze(0).expand(batch_size, -1)
                 encoder_in_pos_embed.append(cam_pos_embed)
                 cam_idx += 1
 
-        # Stack all tokens along the sequence dimension.
         encoder_in_tokens = torch.stack(encoder_in_tokens, dim=0)
         encoder_in_pos_embed = torch.stack(encoder_in_pos_embed, dim=0)
-
-        # Forward pass through the transformer modules.
         encoder_out = self.encoder(encoder_in_tokens, pos_embed=encoder_in_pos_embed)
+        
         # TODO(rcadene, alexander-soare): remove call to `device` ; precompute and use buffer
         decoder_in = torch.zeros(
             (self.config.chunk_size, batch_size, self.config.dim_model),

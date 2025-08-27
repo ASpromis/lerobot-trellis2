@@ -141,10 +141,10 @@ class ACTConfig(PreTrainedConfig):
         super().__post_init__()
 
         """Input validation (not exhaustive)."""
-        if not (self.vision_backbone.startswith("resnet") or self.vision_backbone == "dinov2"):
-            raise ValueError(
-                f"`vision_backbone` must be one of the ResNet variants or 'dinov2'. Got {self.vision_backbone}."
-            )
+        # if not (self.vision_backbone.startswith("resnet") or self.vision_backbone == "dinov2"):
+        #     raise ValueError(
+        #         f"`vision_backbone` must be one of the ResNet variants or 'dinov2'. Got {self.vision_backbone}."
+        #     )
         if self.temporal_ensemble_coeff is not None and self.n_action_steps > 1:
             raise NotImplementedError(
                 "`n_action_steps` must be 1 when using temporal ensembling. This is "
